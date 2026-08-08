@@ -406,6 +406,21 @@ describe('CandleStreamChannel', () => {
       ).toHaveBeenCalled();
     });
 
+    it('skips a deferred connection after its last subscriber unmounts', () => {
+      mockSubscribeToCandles.mockReturnValue(jest.fn());
+
+      const unsubscribe = channel.subscribe({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+        callback: jest.fn(),
+      });
+      unsubscribe();
+      flushConnectDebounce();
+
+      expect(mockSubscribeToCandles).not.toHaveBeenCalled();
+    });
+
     it('should defer connection if controller is reinitializing', () => {
       mockIsCurrentlyReinitializing.mockReturnValue(true);
       mockSubscribeToCandles.mockReturnValue(jest.fn());

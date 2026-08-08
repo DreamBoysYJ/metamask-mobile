@@ -115,6 +115,7 @@ export function usePerpsAdvancedChartAdapter({
 
   /** Always reflects the most recently received CandleData (unthrottled). */
   const latestCandleDataRef = useRef<CandleData | null>(null);
+  const streamContextClearedRef = useRef(false);
   /** Last bar emitted — used to detect ticks vs full loads. */
   const prevLastBarRef = useRef<OHLCVBar | null>(null);
   /** Cleared once the first delivery (or an error) lands, so the skeleton never hangs. */
@@ -156,6 +157,7 @@ export function usePerpsAdvancedChartAdapter({
     prevLastBarRef.current = null;
     latestCandleDataRef.current = null;
     hasReceivedFirstUpdateRef.current = false;
+    streamContextClearedRef.current = false;
 
     const unsubscribe = stream.candles.subscribe({
       symbol,
@@ -163,6 +165,10 @@ export function usePerpsAdvancedChartAdapter({
       duration: TimeDuration.OneWeek,
       callback: (candleData: CandleData) => {
         if (isCandleStreamClearSignal(candleData)) {
+          if (streamContextClearedRef.current) {
+            return;
+          }
+          streamContextClearedRef.current = true;
           setStreamContextGeneration((generation) => generation + 1);
           setOhlcvData([]);
           setRealtimeBar(undefined);
@@ -181,6 +187,8 @@ export function usePerpsAdvancedChartAdapter({
         ) {
           return;
         }
+
+        streamContextClearedRef.current = false;
 
         latestCandleDataRef.current = candleData;
 

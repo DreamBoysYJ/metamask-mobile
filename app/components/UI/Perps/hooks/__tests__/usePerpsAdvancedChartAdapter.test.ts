@@ -297,6 +297,15 @@ describe('usePerpsAdvancedChartAdapter loading lifecycle', () => {
 
     act(() => {
       subscribeParams().callback({
+        symbol: '',
+        interval: CandlePeriod.OneHour,
+        candles: [],
+      });
+    });
+    expect(result.current.streamContextGeneration).toBe(1);
+
+    act(() => {
+      subscribeParams().callback({
         symbol: SYMBOL,
         interval: INTERVAL,
         candles: [{ ...candle(2000), close: '106' }],

@@ -471,6 +471,14 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     if (this.wsSubscriptions.has(cacheKey)) {
       return;
     }
+    const hasActiveSubscribers = Array.from(this.subscribers.values()).some(
+      (subscriber) => subscriber.cacheKey === cacheKey,
+    );
+    if (!hasActiveSubscribers) {
+      this.connectRetryCounts.delete(cacheKey);
+      this.subscriptionRetryCounts.delete(cacheKey);
+      return;
+    }
     if (
       !this.getIsInitialized() ||
       Engine.context.PerpsController.isCurrentlyReinitializing()
