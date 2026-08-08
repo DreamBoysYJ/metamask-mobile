@@ -158,6 +158,45 @@ describe('useHomepageSparklines', () => {
     expect(result.current.sparklines.ETH).toBeDefined();
   });
 
+  it('clears stale context data and accepts the first fresh-context candles', async () => {
+    let callback: ((candleData: CandleData) => void) | undefined;
+    mockSubscribe.mockImplementation(
+      (params: { callback: (candleData: CandleData) => void }) => {
+        callback = params.callback;
+        return jest.fn();
+      },
+    );
+
+    const { result } = renderHook(() => useHomepageSparklines(['BTC']));
+
+    await act(async () => {
+      callback?.({
+        symbol: 'BTC',
+        interval: CandlePeriod.FifteenMinutes,
+        candles: makeCandles(10),
+      });
+    });
+    expect(result.current.sparklines.BTC?.[0]).toBe(100);
+
+    await act(async () => {
+      callback?.({
+        symbol: '',
+        interval: CandlePeriod.FifteenMinutes,
+        candles: [],
+      });
+    });
+    expect(result.current.sparklines.BTC).toBeUndefined();
+
+    await act(async () => {
+      callback?.({
+        symbol: 'BTC',
+        interval: CandlePeriod.FifteenMinutes,
+        candles: makeCandles(10, Array(10).fill(200)),
+      });
+    });
+    expect(result.current.sparklines.BTC?.[0]).toBe(200);
+  });
+
   it('refresh clears data and resubscribes', async () => {
     const callbacks: Record<string, (candleData: CandleData) => void> = {};
     mockSubscribe.mockImplementation(

@@ -5,6 +5,7 @@ import {
   TimeDuration,
   type CandleData,
 } from '@metamask/perps-controller';
+import { isCandleStreamClearSignal } from '../../../../../UI/Perps/providers/channels/candleStreamUtils';
 
 const SPARKLINE_TARGET_POINTS = 50;
 const SPARKLINE_CANDLE_COUNT = 96; // 24h of 15-min candles
@@ -80,6 +81,14 @@ export function useHomepageSparklines(
         interval: CandlePeriod.FifteenMinutes,
         duration: TimeDuration.OneDay,
         callback: (candleData: CandleData) => {
+          if (isCandleStreamClearSignal(candleData)) {
+            const { [symbol]: _staleSparkline, ...remainingSparklines } =
+              dataRef.current;
+            dataRef.current = remainingSparklines;
+            scheduleFlush();
+            return;
+          }
+
           if (dataRef.current[symbol]) return;
           if (!candleData?.candles || candleData.candles.length < 2) return;
 

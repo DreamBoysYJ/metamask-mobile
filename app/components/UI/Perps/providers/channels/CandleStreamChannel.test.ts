@@ -7,6 +7,7 @@ import {
   type CandleData,
 } from '@metamask/perps-controller';
 import Engine from '../../../../../core/Engine';
+import { isCandleStreamClearSignal } from './candleStreamUtils';
 
 const mockGetIsInitialized = jest.fn().mockReturnValue(true);
 
@@ -205,6 +206,9 @@ describe('CandleStreamChannel', () => {
           interval: CandlePeriod.OneHour,
           candles: [],
         }),
+      );
+      expect(isCandleStreamClearSignal(callback.mock.calls.at(-1)?.[0])).toBe(
+        true,
       );
     });
 
