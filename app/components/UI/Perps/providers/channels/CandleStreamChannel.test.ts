@@ -540,6 +540,69 @@ describe('CandleStreamChannel', () => {
       expect(mockSubscribeToCandles).toHaveBeenCalledTimes(4);
     });
 
+    it('bounds retries when each failed socket first delivers a snapshot', () => {
+      const controllerAttempts: {
+        callback: (data: CandleData) => void;
+        onError: (error: Error) => void;
+      }[] = [];
+      mockSubscribeToCandles.mockImplementation(({ callback, onError }) => {
+        controllerAttempts.push({ callback, onError });
+        return jest.fn();
+      });
+
+      channel.subscribe({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+        callback: jest.fn(),
+      });
+      flushConnectDebounce();
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        controllerAttempts[attempt].callback(mockCandleData);
+        controllerAttempts[attempt].onError(
+          new Error(`failure ${attempt + 1}`),
+        );
+        jest.advanceTimersByTime(PERPS_CONSTANTS.ConnectRetryDelayMs);
+      }
+
+      expect(mockSubscribeToCandles).toHaveBeenCalledTimes(4);
+    });
+
+    it('restores the retry budget after confirmed live socket data', () => {
+      const controllerAttempts: {
+        callback: (data: CandleData) => void;
+        onError: (error: Error) => void;
+      }[] = [];
+      mockSubscribeToCandles.mockImplementation(({ callback, onError }) => {
+        controllerAttempts.push({ callback, onError });
+        return jest.fn();
+      });
+
+      channel.subscribe({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+        callback: jest.fn(),
+      });
+      flushConnectDebounce();
+
+      controllerAttempts[0].onError(new Error('first incident'));
+      jest.advanceTimersByTime(PERPS_CONSTANTS.ConnectRetryDelayMs);
+
+      controllerAttempts[1].callback(mockCandleData);
+      controllerAttempts[1].callback(mockCandleData);
+
+      for (let attempt = 1; attempt < 5; attempt += 1) {
+        controllerAttempts[attempt].onError(
+          new Error(`second incident ${attempt}`),
+        );
+        jest.advanceTimersByTime(PERPS_CONSTANTS.ConnectRetryDelayMs);
+      }
+
+      expect(mockSubscribeToCandles).toHaveBeenCalledTimes(5);
+    });
+
     it('retries when the controller reports an error during subscription setup', () => {
       const firstUnsubscribe = jest.fn();
       mockSubscribeToCandles

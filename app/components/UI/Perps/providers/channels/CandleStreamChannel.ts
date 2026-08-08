@@ -299,8 +299,8 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
 
   /**
    * Retry a failed controller candle subscription while consumers remain
-   * mounted. The count resets only after fresh candle data arrives so a
-   * persistently failing socket cannot loop forever.
+   * mounted. The count resets only after confirmed live WebSocket data so the
+   * controller's initial REST snapshot cannot bypass the retry bound.
    */
   private retrySubscription(
     symbol: string,
@@ -506,7 +506,8 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     const subscriptionAttempt: {
       unsubscribe?: () => void;
       failed: boolean;
-    } = { failed: false };
+      hasReceivedInitialSnapshot: boolean;
+    } = { failed: false, hasReceivedInitialSnapshot: false };
     const unsubscribe = Engine.context.PerpsController.subscribeToCandles({
       symbol,
       interval,
@@ -516,7 +517,14 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
           return;
         }
 
-        this.subscriptionRetryCounts.delete(cacheKey);
+        // The controller emits one REST snapshot before it awaits the
+        // WebSocket subscription. A later callback confirms live socket data
+        // and starts a fresh retry budget for a future connection incident.
+        if (subscriptionAttempt.hasReceivedInitialSnapshot) {
+          this.subscriptionRetryCounts.delete(cacheKey);
+        } else {
+          subscriptionAttempt.hasReceivedInitialSnapshot = true;
+        }
 
         // Merge incoming candles into the existing cache instead of replacing.
         // This preserves older candles on revisit (when we intentionally fetch
