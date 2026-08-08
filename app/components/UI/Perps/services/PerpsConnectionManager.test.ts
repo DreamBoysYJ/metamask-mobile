@@ -82,7 +82,11 @@ const mockStreamManagerInstance = {
   oiCaps: { clearCache: jest.fn(), prewarm: jest.fn(() => jest.fn()) },
   fills: { clearCache: jest.fn(), prewarm: jest.fn(() => jest.fn()) },
   topOfBook: { clearCache: jest.fn(), prewarm: jest.fn(() => jest.fn()) },
-  candles: { clearCache: jest.fn(), prewarm: jest.fn(() => jest.fn()) },
+  candles: {
+    clearCache: jest.fn(),
+    prewarm: jest.fn(() => jest.fn()),
+    reconnect: jest.fn(),
+  },
   resetDiskCacheThrottles: jest.fn(),
   clearAllChannels: jest.fn(),
 };
@@ -897,6 +901,20 @@ describe('PerpsConnectionManager', () => {
       // Manager now calls initializeProviders directly (Controller.reconnectWithNewContext was removed as redundant)
       // Account data will be fetched via WebSocket subscriptions during preload, no explicit getAccountState() call
       expect(mockPerpsController.init).toHaveBeenCalled();
+    });
+
+    it('reconnects active candle subscriptions with the new context', async () => {
+      mockPerpsController.init.mockResolvedValue();
+
+      await (
+        PerpsConnectionManager as unknown as {
+          reconnectWithNewContext: () => Promise<void>;
+        }
+      ).reconnectWithNewContext();
+
+      expect(mockStreamManagerInstance.candles.reconnect).toHaveBeenCalledTimes(
+        1,
+      );
     });
 
     it('waits for concurrent controller reinit before health-check ping', async () => {

@@ -502,11 +502,14 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     });
 
     // Log subscription establishment (once per subscription)
-    DevLogger.log('CandleStreamChannel: WebSocket subscription established', {
-      symbol,
-      interval,
-      cacheKey,
-    });
+    DevLogger.log(
+      `CandleStreamChannel: WebSocket subscription established [${cacheKey}]`,
+      {
+        symbol,
+        interval,
+        cacheKey,
+      },
+    );
 
     // Store cleanup function
     this.wsSubscriptions.set(cacheKey, unsubscribe);
@@ -815,6 +818,11 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     // Get unique cache keys from subscribers before disconnecting
     const activeCacheKeys = new Set(
       Array.from(this.subscribers.values()).map((sub) => sub.cacheKey),
+    );
+
+    DevLogger.log(
+      `CandleStreamChannel: Reconnecting ${activeCacheKeys.size} active subscription key(s)`,
+      { cacheKeys: Array.from(activeCacheKeys) },
     );
 
     // Disconnect all WebSocket subscriptions (they're dead after reconnection)

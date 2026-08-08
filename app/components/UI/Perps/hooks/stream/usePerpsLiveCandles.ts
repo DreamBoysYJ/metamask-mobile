@@ -100,6 +100,18 @@ export function usePerpsLiveCandles(
             return;
           }
 
+          // The channel uses an empty symbol to tell mounted consumers that
+          // its cache was cleared for a new account/provider/network context.
+          if (
+            newCandleData.symbol === '' &&
+            newCandleData.candles.length === 0
+          ) {
+            hasReceivedFirstUpdate.current = false;
+            setCandleData(null);
+            setIsLoading(true);
+            return;
+          }
+
           // DEFENSIVE: Validate incoming data matches current subscription
           // This prevents race conditions when switching symbols where old subscription
           // might deliver data after new subscription starts

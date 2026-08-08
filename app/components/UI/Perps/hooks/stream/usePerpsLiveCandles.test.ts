@@ -9,14 +9,15 @@ import {
 // Mock the stream provider
 const mockCandleSubscribe = jest.fn();
 const mockFetchHistoricalCandles = jest.fn();
+const mockPerpsStream = {
+  candles: {
+    subscribe: mockCandleSubscribe,
+    fetchHistoricalCandles: mockFetchHistoricalCandles,
+  },
+};
 
 jest.mock('../../providers/PerpsStreamManager', () => ({
-  usePerpsStream: jest.fn(() => ({
-    candles: {
-      subscribe: mockCandleSubscribe,
-      fetchHistoricalCandles: mockFetchHistoricalCandles,
-    },
-  })),
+  usePerpsStream: jest.fn(() => mockPerpsStream),
 }));
 
 // Mock DevLogger to suppress logs in tests
@@ -260,6 +261,40 @@ describe('usePerpsLiveCandles', () => {
     });
 
     // Should not update state
+    expect(result.current.candleData).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it('clears visible candles when the stream cache is cleared', () => {
+    let capturedCallback: (data: CandleData) => void = jest.fn();
+    mockCandleSubscribe.mockImplementation((params) => {
+      capturedCallback = params.callback;
+      return jest.fn();
+    });
+
+    const { result } = renderHook(() =>
+      usePerpsLiveCandles({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+      }),
+    );
+
+    act(() => {
+      capturedCallback(mockCandleData);
+    });
+
+    expect(result.current.candleData).toEqual(mockCandleData);
+    expect(result.current.isLoading).toBe(false);
+
+    act(() => {
+      capturedCallback({
+        symbol: '',
+        interval: CandlePeriod.OneHour,
+        candles: [],
+      });
+    });
+
     expect(result.current.candleData).toBeNull();
     expect(result.current.isLoading).toBe(true);
   });
