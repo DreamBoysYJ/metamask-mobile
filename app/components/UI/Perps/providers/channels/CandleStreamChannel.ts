@@ -126,9 +126,11 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     ReturnType<typeof setTimeout>
   >();
   private connectRetryCounts = new Map<string, number>();
+  private subscriptionRetryCounts = new Map<string, number>();
   private readonly prewarmRequests = new Set<string>();
   private contextGeneration = 0;
   private static readonly MAX_CONNECT_RETRIES = 50;
+  private static readonly MAX_SUBSCRIPTION_RETRIES = 3;
   // Upper bound on cached candles per cacheKey. Matches fetchHistoricalCandles
   // so merge-on-update can't cause unbounded memory growth.
   private static readonly MAX_CACHED_CANDLES = 1000;
@@ -232,6 +234,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     });
     this.pendingTeardownTimers.clear();
     this.connectRetryCounts.clear();
+    this.subscriptionRetryCounts.clear();
     this.prewarmRequests.clear();
     super.clearCache();
   }
@@ -291,6 +294,37 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
         this.deferConnectTimers.delete(cacheKey);
         this.connectNow(symbol, interval, cacheKey);
       }, delayMs),
+    );
+  }
+
+  /**
+   * Retry a failed controller candle subscription while consumers remain
+   * mounted. The count resets only after fresh candle data arrives so a
+   * persistently failing socket cannot loop forever.
+   */
+  private retrySubscription(
+    symbol: string,
+    interval: CandlePeriod,
+    cacheKey: string,
+  ): void {
+    const retryCount = this.subscriptionRetryCounts.get(cacheKey) ?? 0;
+    if (retryCount >= CandleStreamChannel.MAX_SUBSCRIPTION_RETRIES) {
+      DevLogger.log(
+        'CandleStreamChannel: Max subscription retries exceeded, giving up',
+        {
+          cacheKey,
+          maxRetries: CandleStreamChannel.MAX_SUBSCRIPTION_RETRIES,
+        },
+      );
+      return;
+    }
+
+    this.subscriptionRetryCounts.set(cacheKey, retryCount + 1);
+    this.deferConnect(
+      symbol,
+      interval,
+      cacheKey,
+      PERPS_CONSTANTS.ConnectRetryDelayMs,
     );
   }
 
@@ -461,6 +495,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     const duration = hasCachedData ? TimeDuration.OneDay : TimeDuration.OneWeek;
     const contextGeneration = this.contextGeneration;
 
+    const subscriptionAttempt: {
+      unsubscribe?: () => void;
+      failed: boolean;
+    } = { failed: false };
     const unsubscribe = Engine.context.PerpsController.subscribeToCandles({
       symbol,
       interval,
@@ -469,6 +507,8 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
         if (contextGeneration !== this.contextGeneration) {
           return;
         }
+
+        this.subscriptionRetryCounts.delete(cacheKey);
 
         // Merge incoming candles into the existing cache instead of replacing.
         // This preserves older candles on revisit (when we intentionally fetch
@@ -485,9 +525,13 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
         this.notifySubscribers(cacheKey, merged);
       },
       onError: (error: Error) => {
-        if (contextGeneration !== this.contextGeneration) {
+        if (
+          contextGeneration !== this.contextGeneration ||
+          subscriptionAttempt.failed
+        ) {
           return;
         }
+        subscriptionAttempt.failed = true;
 
         // Log initialization failure
         DevLogger.log(
@@ -508,10 +552,31 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
           subscriber.onError?.(error);
         });
 
-        // Clean up failed subscription
-        this.wsSubscriptions.delete(cacheKey);
+        // Clean up only this failed attempt, then retry while mounted. The
+        // callback may run synchronously during subscribeToCandles(), before
+        // the returned cleanup function is assigned, so connectNow also checks
+        // the failed flag before storing the attempt.
+        if (
+          this.wsSubscriptions.get(cacheKey) === subscriptionAttempt.unsubscribe
+        ) {
+          this.wsSubscriptions.delete(cacheKey);
+        }
+        subscriptionAttempt.unsubscribe?.();
+        this.retrySubscription(symbol, interval, cacheKey);
       },
     });
+    subscriptionAttempt.unsubscribe = unsubscribe;
+
+    if (
+      subscriptionAttempt.failed ||
+      contextGeneration !== this.contextGeneration ||
+      !Array.from(this.subscribers.values()).some(
+        (subscriber) => subscriber.cacheKey === cacheKey,
+      )
+    ) {
+      unsubscribe();
+      return;
+    }
 
     // Log subscription establishment (once per subscription)
     DevLogger.log(
@@ -542,6 +607,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     // Cancel any pending deferred teardown — explicit disconnect supersedes it
     this.cancelPendingTeardown(cacheKey);
     this.connectRetryCounts.delete(cacheKey);
+    this.subscriptionRetryCounts.delete(cacheKey);
     // Disconnect specific subscription
     const unsubscribe = this.wsSubscriptions.get(cacheKey);
     if (unsubscribe) {
@@ -821,6 +887,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     });
     this.pendingTeardownTimers.clear();
     this.connectRetryCounts.clear();
+    this.subscriptionRetryCounts.clear();
     this.prewarmRequests.clear();
 
     this.subscribers.forEach((subscriber) => {
@@ -847,10 +914,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
       Array.from(this.subscribers.values()).map((sub) => sub.cacheKey),
     );
 
-    DevLogger.log(
-      `CandleStreamChannel: Reconnecting ${activeCacheKeys.size} active subscription key(s)`,
-      { cacheKeys: Array.from(activeCacheKeys) },
-    );
+    DevLogger.log('CandleStreamChannel: Reconnecting active subscriptions', {
+      activeKeyCount: activeCacheKeys.size,
+      cacheKeys: Array.from(activeCacheKeys),
+    });
 
     // Disconnect all WebSocket subscriptions (they're dead after reconnection)
     // Using disconnect() without args to call disconnectAll() internally

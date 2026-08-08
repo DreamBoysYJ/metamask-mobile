@@ -81,6 +81,7 @@ export interface UsePerpsAdvancedChartAdapterResult {
   realtimeBar: OHLCVBar | undefined;
   latestBar: OHLCVBar | undefined;
   ohlcvSeriesKey: string;
+  streamContextGeneration: number;
   visibleFromMs: number | undefined;
   visibleToMs: number | undefined;
   isLoading: boolean;
@@ -110,6 +111,7 @@ export function usePerpsAdvancedChartAdapter({
     undefined,
   );
   const [isLoading, setIsLoading] = useState(true);
+  const [streamContextGeneration, setStreamContextGeneration] = useState(0);
 
   /** Always reflects the most recently received CandleData (unthrottled). */
   const latestCandleDataRef = useRef<CandleData | null>(null);
@@ -161,6 +163,7 @@ export function usePerpsAdvancedChartAdapter({
       duration: TimeDuration.OneWeek,
       callback: (candleData: CandleData) => {
         if (isCandleStreamClearSignal(candleData)) {
+          setStreamContextGeneration((generation) => generation + 1);
           setOhlcvData([]);
           setRealtimeBar(undefined);
           setIsLoading(true);
@@ -290,6 +293,7 @@ export function usePerpsAdvancedChartAdapter({
     realtimeBar,
     latestBar,
     ohlcvSeriesKey,
+    streamContextGeneration,
     visibleFromMs,
     visibleToMs,
     isLoading,

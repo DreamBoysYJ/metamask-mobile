@@ -194,6 +194,7 @@ const PerpsAdvancedChart: React.FC<PerpsAdvancedChartProps> = ({
     realtimeBar,
     latestBar,
     ohlcvSeriesKey,
+    streamContextGeneration,
     visibleFromMs,
     visibleToMs,
     isLoading,
@@ -248,7 +249,10 @@ const PerpsAdvancedChart: React.FC<PerpsAdvancedChartProps> = ({
   }, [szDecimals]);
 
   const volumeColors = useMemo(() => getPerpsVolumeColors(colors), [colors]);
-  const webViewInstanceKey = useMemo(() => `${symbol}|perps`, [symbol]);
+  const webViewInstanceKey = useMemo(
+    () => `${symbol}|perps|${streamContextGeneration}`,
+    [symbol, streamContextGeneration],
+  );
 
   useEffect(() => {
     onLatestPriceChange?.(

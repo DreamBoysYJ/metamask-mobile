@@ -273,6 +273,8 @@ describe('usePerpsAdvancedChartAdapter loading lifecycle', () => {
   it('clears old-context bars and treats the next delivery as a full load', () => {
     const { result } = renderAdapter();
 
+    expect(result.current.streamContextGeneration).toBe(0);
+
     act(() => {
       subscribeParams().callback({
         symbol: SYMBOL,
@@ -291,6 +293,7 @@ describe('usePerpsAdvancedChartAdapter loading lifecycle', () => {
     expect(result.current.ohlcvData).toEqual([]);
     expect(result.current.realtimeBar).toBeUndefined();
     expect(result.current.isLoading).toBe(true);
+    expect(result.current.streamContextGeneration).toBe(1);
 
     act(() => {
       subscribeParams().callback({

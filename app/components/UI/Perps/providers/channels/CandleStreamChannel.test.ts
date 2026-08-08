@@ -447,6 +447,102 @@ describe('CandleStreamChannel', () => {
       );
     });
 
+    it('retries a failed reconnect and delivers fresh candles to mounted subscribers', () => {
+      const callback = jest.fn();
+      const onError = jest.fn();
+      const controllerAttempts: {
+        callback: (data: CandleData) => void;
+        onError: (error: Error) => void;
+      }[] = [];
+      mockSubscribeToCandles.mockImplementation(
+        ({ callback: onData, onError: onControllerError }) => {
+          controllerAttempts.push({
+            callback: onData,
+            onError: onControllerError,
+          });
+          return jest.fn();
+        },
+      );
+
+      channel.subscribe({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+        callback,
+        onError,
+      });
+      flushConnectDebounce();
+      controllerAttempts[0].callback(mockCandleData);
+
+      channel.clearCache();
+      channel.reconnect();
+      flushConnectDebounce();
+      callback.mockClear();
+
+      const reconnectError = new Error('reconnect failed');
+      controllerAttempts[1].onError(reconnectError);
+      expect(onError).toHaveBeenCalledWith(reconnectError);
+
+      jest.advanceTimersByTime(PERPS_CONSTANTS.ConnectRetryDelayMs);
+      expect(mockSubscribeToCandles).toHaveBeenCalledTimes(3);
+
+      const freshContextData = {
+        ...mockCandleData,
+        candles: [{ ...mockCandleData.candles[0], close: '50600' }],
+      };
+      controllerAttempts[2].callback(freshContextData);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(freshContextData);
+    });
+
+    it('bounds retries when a mounted candle subscription keeps failing', () => {
+      const controllerErrors: ((error: Error) => void)[] = [];
+      mockSubscribeToCandles.mockImplementation(
+        ({ onError: onControllerError }) => {
+          controllerErrors.push(onControllerError);
+          return jest.fn();
+        },
+      );
+
+      channel.subscribe({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+        callback: jest.fn(),
+      });
+      flushConnectDebounce();
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        controllerErrors[attempt](new Error(`failure ${attempt + 1}`));
+        jest.advanceTimersByTime(PERPS_CONSTANTS.ConnectRetryDelayMs);
+      }
+
+      expect(mockSubscribeToCandles).toHaveBeenCalledTimes(4);
+    });
+
+    it('retries when the controller reports an error during subscription setup', () => {
+      const firstUnsubscribe = jest.fn();
+      mockSubscribeToCandles
+        .mockImplementationOnce(({ onError: onControllerError }) => {
+          onControllerError(new Error('setup failed'));
+          return firstUnsubscribe;
+        })
+        .mockReturnValueOnce(jest.fn());
+
+      channel.subscribe({
+        symbol: 'BTC',
+        interval: CandlePeriod.OneHour,
+        duration: TimeDuration.OneDay,
+        callback: jest.fn(),
+      });
+      flushConnectDebounce();
+
+      expect(firstUnsubscribe).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(PERPS_CONSTANTS.ConnectRetryDelayMs);
+      expect(mockSubscribeToCandles).toHaveBeenCalledTimes(2);
+    });
+
     it('uses a lighter initial candle fetch when reconnecting with cached data', () => {
       let capturedCallback: ((data: CandleData) => void) | undefined;
       const mockUnsubscribe = jest.fn();

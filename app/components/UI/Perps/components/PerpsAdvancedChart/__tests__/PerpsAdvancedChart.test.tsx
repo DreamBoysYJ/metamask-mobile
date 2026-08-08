@@ -72,6 +72,7 @@ const mockAdapterResult = {
   realtimeBar: undefined,
   latestBar: undefined,
   ohlcvSeriesKey: 'BTC|1h',
+  streamContextGeneration: 0,
   visibleFromMs: undefined,
   visibleToMs: undefined,
   isLoading: false,
@@ -157,7 +158,7 @@ describe('PerpsAdvancedChart', () => {
   it('keeps the AdvancedChart WebView instance stable across interval changes', () => {
     const { rerender } = renderChart();
 
-    expect(latestAdvancedChartProps().webViewInstanceKey).toBe('BTC|perps');
+    expect(latestAdvancedChartProps().webViewInstanceKey).toBe('BTC|perps|0');
     expect(latestAdvancedChartProps().ohlcvSeriesKey).toBe('BTC|1h');
 
     mockUsePerpsAdvancedChartAdapter.mockReturnValue({
@@ -175,8 +176,33 @@ describe('PerpsAdvancedChart', () => {
       />,
     );
 
-    expect(latestAdvancedChartProps().webViewInstanceKey).toBe('BTC|perps');
+    expect(latestAdvancedChartProps().webViewInstanceKey).toBe('BTC|perps|0');
     expect(latestAdvancedChartProps().ohlcvSeriesKey).toBe('BTC|4h');
+  });
+
+  it('remounts the AdvancedChart WebView when the stream context changes', () => {
+    const { rerender } = renderChart();
+
+    expect(latestAdvancedChartProps().webViewInstanceKey).toBe('BTC|perps|0');
+
+    mockUsePerpsAdvancedChartAdapter.mockReturnValue({
+      ...mockAdapterResult,
+      streamContextGeneration: 1,
+      isLoading: true,
+    });
+
+    rerender(
+      <PerpsAdvancedChart
+        symbol="BTC"
+        interval={CandlePeriod.OneHour}
+        visibleCandleCount={100}
+        height={240}
+        fallbackCandleData={null}
+      />,
+    );
+
+    expect(latestAdvancedChartProps().webViewInstanceKey).toBe('BTC|perps|1');
+    expect(latestAdvancedChartProps().isLoading).toBe(true);
   });
 
   it('notifies the parent when the latest adapter close changes', () => {
