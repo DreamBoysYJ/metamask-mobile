@@ -9,6 +9,7 @@ import {
 import DevLogger from '../../../../../core/SDKConnect/utils/DevLogger';
 import Logger from '../../../../../util/Logger';
 import { ensureError } from '../../../../../util/errorUtils';
+import { isCandleStreamClearSignal } from '../../providers/channels/candleStreamUtils';
 
 // Stable empty candle data reference to prevent re-renders
 const EMPTY_CANDLE_DATA: CandleData = {
@@ -102,13 +103,11 @@ export function usePerpsLiveCandles(
 
           // The channel uses an empty symbol to tell mounted consumers that
           // its cache was cleared for a new account/provider/network context.
-          if (
-            newCandleData.symbol === '' &&
-            newCandleData.candles.length === 0
-          ) {
+          if (isCandleStreamClearSignal(newCandleData)) {
             hasReceivedFirstUpdate.current = false;
             setCandleData(null);
             setIsLoading(true);
+            setError(null);
             return;
           }
 
@@ -135,6 +134,7 @@ export function usePerpsLiveCandles(
             setIsLoading(false);
           }
 
+          setError(null);
           setCandleData(newCandleData);
         },
         throttleMs,

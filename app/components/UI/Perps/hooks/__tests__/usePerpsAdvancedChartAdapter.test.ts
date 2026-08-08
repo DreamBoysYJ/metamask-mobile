@@ -270,6 +270,43 @@ describe('usePerpsAdvancedChartAdapter loading lifecycle', () => {
     expect(result.current.ohlcvData).toHaveLength(1);
   });
 
+  it('clears old-context bars and treats the next delivery as a full load', () => {
+    const { result } = renderAdapter();
+
+    act(() => {
+      subscribeParams().callback({
+        symbol: SYMBOL,
+        interval: INTERVAL,
+        candles: [candle(1000)],
+      });
+    });
+    act(() => {
+      subscribeParams().callback({
+        symbol: '',
+        interval: CandlePeriod.OneHour,
+        candles: [],
+      });
+    });
+
+    expect(result.current.ohlcvData).toEqual([]);
+    expect(result.current.realtimeBar).toBeUndefined();
+    expect(result.current.isLoading).toBe(true);
+
+    act(() => {
+      subscribeParams().callback({
+        symbol: SYMBOL,
+        interval: INTERVAL,
+        candles: [{ ...candle(2000), close: '106' }],
+      });
+    });
+
+    expect(result.current.ohlcvData).toEqual([
+      { time: 2000, open: 100, high: 110, low: 90, close: 106, volume: 500 },
+    ]);
+    expect(result.current.realtimeBar).toBeUndefined();
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('keeps previous candles visible during interval refresh and replaces them when fresh data arrives', () => {
     const { result, rerender } = renderHook(
       ({ interval }) =>

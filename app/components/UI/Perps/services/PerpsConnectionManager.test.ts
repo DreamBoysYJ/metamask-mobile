@@ -24,9 +24,7 @@ jest.mock('../../../../core/Engine', () => ({
       getAccountState: jest.fn(),
       disconnect: jest.fn(),
       reconnectWithNewContext: jest.fn(),
-      getActiveProvider: jest.fn(() => ({
-        ping: jest.fn().mockResolvedValue(undefined),
-      })),
+      getActiveProvider: jest.fn(),
       isCurrentlyReinitializing: jest.fn(() => false),
     },
   },
@@ -90,6 +88,8 @@ const mockStreamManagerInstance = {
   resetDiskCacheThrottles: jest.fn(),
   clearAllChannels: jest.fn(),
 };
+
+const mockProviderPing = jest.fn().mockResolvedValue(undefined);
 
 jest.mock('../providers/PerpsStreamManager', () => ({
   getStreamManagerInstance: jest.fn(() => mockStreamManagerInstance),
@@ -223,6 +223,10 @@ describe('PerpsConnectionManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockProviderPing.mockResolvedValue(undefined);
+    (
+      Engine.context.PerpsController.getActiveProvider as unknown as jest.Mock
+    ).mockReturnValue({ ping: mockProviderPing });
 
     // Clear store callbacks array for test isolation
     storeCallbacks.length = 0;
@@ -915,6 +919,50 @@ describe('PerpsConnectionManager', () => {
       expect(mockStreamManagerInstance.candles.reconnect).toHaveBeenCalledTimes(
         1,
       );
+      expect(mockPerpsController.init.mock.invocationCallOrder[0]).toBeLessThan(
+        mockProviderPing.mock.invocationCallOrder[0],
+      );
+      expect(mockProviderPing.mock.invocationCallOrder[0]).toBeLessThan(
+        mockStreamManagerInstance.candles.reconnect.mock.invocationCallOrder[0],
+      );
+      expect(
+        mockStreamManagerInstance.candles.reconnect.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mockStreamManagerInstance.positions.prewarm.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does not reconnect candles when controller initialization fails', async () => {
+      mockPerpsController.init.mockRejectedValueOnce(new Error('init failed'));
+
+      await expect(
+        (
+          PerpsConnectionManager as unknown as {
+            reconnectWithNewContext: () => Promise<void>;
+          }
+        ).reconnectWithNewContext(),
+      ).rejects.toThrow('init failed');
+
+      expect(
+        mockStreamManagerInstance.candles.reconnect,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not reconnect candles when the provider health check fails', async () => {
+      mockPerpsController.init.mockResolvedValue();
+      mockProviderPing.mockRejectedValueOnce(new Error('ping failed'));
+
+      await expect(
+        (
+          PerpsConnectionManager as unknown as {
+            reconnectWithNewContext: () => Promise<void>;
+          }
+        ).reconnectWithNewContext(),
+      ).rejects.toThrow('ping failed');
+
+      expect(
+        mockStreamManagerInstance.candles.reconnect,
+      ).not.toHaveBeenCalled();
     });
 
     it('waits for concurrent controller reinit before health-check ping', async () => {

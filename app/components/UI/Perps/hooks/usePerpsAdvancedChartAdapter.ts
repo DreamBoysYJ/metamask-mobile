@@ -11,6 +11,7 @@ import type {
   FetchOlderBarsRequest,
   FetchOlderBarsResponse,
 } from '../../Charts/AdvancedChart/AdvancedChart.types';
+import { isCandleStreamClearSignal } from '../providers/channels/candleStreamUtils';
 
 /** Maps Perps CandlePeriod strings to milliseconds for visibleFromMs calculation. */
 export const INTERVAL_MS: Partial<Record<string, number>> = {
@@ -159,6 +160,17 @@ export function usePerpsAdvancedChartAdapter({
       interval,
       duration: TimeDuration.OneWeek,
       callback: (candleData: CandleData) => {
+        if (isCandleStreamClearSignal(candleData)) {
+          setOhlcvData([]);
+          setRealtimeBar(undefined);
+          setIsLoading(true);
+          prevLastBarRef.current = null;
+          hasLoadedBarsRef.current = false;
+          latestCandleDataRef.current = null;
+          hasReceivedFirstUpdateRef.current = false;
+          return;
+        }
+
         // Reject stale deliveries from a previous symbol/interval subscription.
         if (
           candleData.symbol !== symbol ||

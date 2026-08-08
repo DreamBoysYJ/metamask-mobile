@@ -95,6 +95,7 @@ abstract class StreamChannel<T> {
         subscriber.timer = undefined;
       }
       subscriber.pendingUpdate = undefined;
+      subscriber.hasReceivedFirstUpdate = false;
     });
 
     // Disconnect all WebSocket subscriptions
@@ -126,6 +127,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
   >();
   private connectRetryCounts = new Map<string, number>();
   private readonly prewarmRequests = new Set<string>();
+  private contextGeneration = 0;
   private static readonly MAX_CONNECT_RETRIES = 50;
   // Upper bound on cached candles per cacheKey. Matches fetchHistoricalCandles
   // so merge-on-update can't cause unbounded memory growth.
@@ -220,6 +222,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
   }
 
   public override clearCache(): void {
+    this.contextGeneration += 1;
     this.deferConnectTimers.forEach((timer) => {
       clearTimeout(timer);
     });
@@ -456,12 +459,17 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     // When cache already has data (revisit), use an even lighter fetch.
     const hasCachedData = this.cache.has(cacheKey);
     const duration = hasCachedData ? TimeDuration.OneDay : TimeDuration.OneWeek;
+    const contextGeneration = this.contextGeneration;
 
     const unsubscribe = Engine.context.PerpsController.subscribeToCandles({
       symbol,
       interval,
       duration,
       callback: (candleData: CandleData) => {
+        if (contextGeneration !== this.contextGeneration) {
+          return;
+        }
+
         // Merge incoming candles into the existing cache instead of replacing.
         // This preserves older candles on revisit (when we intentionally fetch
         // a lighter OneDay window) and keeps live-tick updates idempotent.
@@ -477,6 +485,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
         this.notifySubscribers(cacheKey, merged);
       },
       onError: (error: Error) => {
+        if (contextGeneration !== this.contextGeneration) {
+          return;
+        }
+
         // Log initialization failure
         DevLogger.log(
           'CandleStreamChannel: Subscription initialization failed',
@@ -503,12 +515,8 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
 
     // Log subscription establishment (once per subscription)
     DevLogger.log(
-      `CandleStreamChannel: WebSocket subscription established [${cacheKey}]`,
-      {
-        symbol,
-        interval,
-        cacheKey,
-      },
+      'CandleStreamChannel: WebSocket subscription established',
+      cacheKey,
     );
 
     // Store cleanup function
@@ -580,6 +588,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
   ): Promise<void> {
     const cacheKey = this.getCacheKey(symbol, interval);
     const cachedData = this.cache.get(cacheKey);
+    const contextGeneration = this.contextGeneration;
 
     // If no cached data or no candles, nothing to extend
     if (!cachedData || cachedData.candles.length === 0) {
@@ -636,6 +645,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
           endTime,
         });
 
+      if (contextGeneration !== this.contextGeneration) {
+        return;
+      }
+
       if (!newCandleData || newCandleData.candles.length === 0) {
         DevLogger.log(
           'CandleStreamChannel: No additional historical candles available',
@@ -688,6 +701,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
         },
       );
     } catch (error) {
+      if (contextGeneration !== this.contextGeneration) {
+        return;
+      }
+
       // Expected cancellation — skip Sentry to avoid noisy abort reports
       if (isAbortError(error)) {
         throw error;
@@ -732,10 +749,12 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
   ): Promise<void> {
     const cacheKey = this.getCacheKey(symbol, interval);
     const cachedData = this.cache.get(cacheKey);
+    const contextGeneration = this.contextGeneration;
+    const requestKey = `${contextGeneration}:${cacheKey}`;
     if (cachedData && CandleStreamChannel.isCacheFresh(cachedData)) {
       return;
     }
-    if (this.prewarmRequests.has(cacheKey)) {
+    if (this.prewarmRequests.has(requestKey)) {
       return;
     }
 
@@ -743,7 +762,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
     const limit = Math.min(Math.max(dynamicLimit, 50), 500);
     const endTime = Date.now();
 
-    this.prewarmRequests.add(cacheKey);
+    this.prewarmRequests.add(requestKey);
     try {
       const candleData =
         await Engine.context.PerpsController.fetchHistoricalCandles({
@@ -752,6 +771,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
           limit,
           endTime,
         });
+
+      if (contextGeneration !== this.contextGeneration) {
+        return;
+      }
 
       if (!candleData?.candles.length) {
         return;
@@ -765,6 +788,10 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
       this.cache.set(cacheKey, warmedData);
       this.notifySubscribers(cacheKey, warmedData);
     } catch (error) {
+      if (contextGeneration !== this.contextGeneration) {
+        return;
+      }
+
       if (isAbortError(error)) {
         throw error;
       }
@@ -775,7 +802,7 @@ export class CandleStreamChannel extends StreamChannel<CandleData> {
         error: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      this.prewarmRequests.delete(cacheKey);
+      this.prewarmRequests.delete(requestKey);
     }
   }
 

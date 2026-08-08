@@ -267,8 +267,10 @@ describe('usePerpsLiveCandles', () => {
 
   it('clears visible candles when the stream cache is cleared', () => {
     let capturedCallback: (data: CandleData) => void = jest.fn();
+    let capturedOnError: (error: Error) => void = jest.fn();
     mockCandleSubscribe.mockImplementation((params) => {
       capturedCallback = params.callback;
+      capturedOnError = params.onError;
       return jest.fn();
     });
 
@@ -288,6 +290,12 @@ describe('usePerpsLiveCandles', () => {
     expect(result.current.isLoading).toBe(false);
 
     act(() => {
+      capturedOnError(new Error('old context failed'));
+    });
+
+    expect(result.current.error).toEqual(new Error('old context failed'));
+
+    act(() => {
       capturedCallback({
         symbol: '',
         interval: CandlePeriod.OneHour,
@@ -297,6 +305,15 @@ describe('usePerpsLiveCandles', () => {
 
     expect(result.current.candleData).toBeNull();
     expect(result.current.isLoading).toBe(true);
+    expect(result.current.error).toBeNull();
+
+    act(() => {
+      capturedCallback(mockCandleData);
+    });
+
+    expect(result.current.candleData).toEqual(mockCandleData);
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.error).toBeNull();
   });
 
   it('uses default throttle of 1000ms', () => {
